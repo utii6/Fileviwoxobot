@@ -62,7 +62,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("😂📌 أرسل رابط منشـورك الجميل.")
         context.user_data["awaiting_link"] = True
 
-    elif query.data == "play_xo":
+    elif query.data == "https://viwoxobot.onrender.com":
         await query.message.reply_text("🎮 لعبة XO انطلقت! (هنا تدمج كود اللعبة مالك).")
 
 # ===== استقبال الرابط =====
