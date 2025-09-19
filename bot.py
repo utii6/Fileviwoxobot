@@ -1,144 +1,106 @@
-# bot.py
-import asyncio
 import logging
-import re
+import time
 import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
-from telegram.error import BadRequest
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# --------- الإعدادات ---------
-TOKEN = "8495219196:AAEOQ1T08E4Go_Wpl2ZFG7N4_8QXtDeir5E"
+# ===== إعداداتك =====
+BOT_TOKEN = "8495219196:AAEOQ1T08E4Go_Wpl2ZFG7N4_8QXtDeir5E"
 ADMIN_ID = 5581457665
-CHANNEL = "@Qd3Qd"
-SERVICE_ID = 9183
-API_KEY = "24617bb47d8e9a7b8afdfa385a62aed2"
-API_URL = "https://kds1.com/api/v1/order"  # عدله لو غيره
-QUANTITY = 250
-MINI_APP_URL = "https://viwoxobot.onrender.com"  # ضع رابط xo.html الحقيقي هنا
+CHANNEL_USERNAME = "@Qd3Qd"
 
+API_KEY = "24617bb47d8e9a7b8afdfa385a62aed2"   # KDS API
+SERVICE_ID = 9183   # رقم الخدمة
+QUANTITY = 250      # عدد المشاهدات
+COOLDOWN = 3600     # (بالثواني) كل ساعة مرة
+
+# تخزين آخر طلب لكل يوزر
+last_request = {}
+
+# ===== تفعيل اللوج =====
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --------- أزرار الواجهة ---------
-def get_main_buttons():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎮 اللعبه", url=MINI_APP_URL)],
-        [InlineKeyboardButton("▶️ مشاهدة 250", callback_data=f"service_{SERVICE_ID}")]
-    ])
-
-# --------- /start ---------
+# ===== /start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    name = user.full_name or user.first_name or "مستخدم"
-    welcome = (
-        f"هلا {name}، حبيبي.\n"
-        "↗️اضغط '🎮 اللعبه' لفتح اللعبة مباشرة.\n"
-        "💁أو اضغط '▶️ مشاهدة الفين' لأرسال الفين مشاهدة لمنشورك."
+    chat_id = update.effective_chat.id
+
+    # إشعار للادمن
+    if user.id != ADMIN_ID:
+        await context.bot.send_message(ADMIN_ID, f"😂🔔 مستخدم جديد دخل: {user.first_name} ({user.id})")
+
+    # الأزرار
+    keyboard = [
+        [InlineKeyboardButton("🚀 طلب مشاهدات", callback_data="views")],
+        [InlineKeyboardButton("🎮 العب وفوز XO", callback_data="play_xo")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"اهلا {user.first_name} 🌹\n"
+        " حبيبي اختار من القائمة:\n\n"
+        "💎🚀 لطلب مشاهدات (كل ساعة 250 مجانا)\n"
+        "😂🎮 أو جرب حظك باللعبة XO",
+        reply_markup=reply_markup
     )
 
-    # إشعار للأدمن بدخول جديد
-    try:
-        await context.bot.send_message(chat_id=ADMIN_ID,
-                                       text=f"😂🔔 دخول جديد: {name} (@{user.username or '—'}) id:{user.id}")
-    except Exception:
-        logger.exception("notify admin failed")
-
-    # محاولة التحقق من الاشتراك بالقناة — نتعامل مع BadRequest بصمت
-    try:
-        member = await context.bot.get_chat_member(CHANNEL, user.id)
-        if member.status not in ("member", "creator", "administrator"):
-            join = InlineKeyboardMarkup([[InlineKeyboardButton("مَـدار", url=f"https://t.me/{CHANNEL.lstrip('@')}")]])
-            await update.message.reply_text("🔒 اشترك حبيبي وأرسل /start .", reply_markup=join)
-            return
-    except BadRequest as e:
-        # عادة يحصل لو البوت مو مشرف بالقناة. نخلي الواجهة تظهر لكن نحذر الأدمن في اللوق.
-        logger.warning("get_chat_member failed: %s", e)
-        # نعرض الواجهة رغم عدم التحقق
-        await update.message.reply_text(welcome, reply_markup=get_main_buttons())
-        return
-    except Exception:
-        logger.exception("unexpected error checking membership")
-
-    await update.message.reply_text(welcome, reply_markup=get_main_buttons())
-
-# --------- نلتقط ضغط زر الخدمة ---------
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ===== التعامل مع الأزرار =====
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data or ""
-    if data.startswith("service_"):
-        service_id = int(data.split("_", 1)[1])
-        # نطلب رابط المنشور من المستخدم
-        cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("إلغاء", callback_data="cancel")]])
-        await query.message.reply_text(
-            "أرسل الآن رابط منشورك الجميل🦾.\nمثال: https://t.me/qd3qd/6",
-            reply_markup=cancel_btn
-        )
-        context.user_data["awaiting_service"] = service_id
-    elif data == "cancel":
-        context.user_data.pop("awaiting_service", None)
-        await query.message.reply_text("!تم الإلغاء.")
 
-# --------- نلتقط الرابط النصي ---------
-URL_RE = re.compile(r"https?://\S+")
+    if query.data == "views":
+        user_id = query.from_user.id
+        now = time.time()
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "awaiting_service" not in context.user_data:
-        return  # رسالة عادية نتركها بدون رد
-    link = update.message.text.strip()
-    if not URL_RE.search(link):
-        await update.message.reply_text("الرابط غير صالح. حاول ترسله بصيغة تبدأ بـ http أو https.")
-        return
+        if user_id in last_request and now - last_request[user_id] < COOLDOWN:
+            remaining = int((COOLDOWN - (now - last_request[user_id])) / 60)
+            await query.message.reply_text(f"🤯⏳ تقدر تطلب بعد {remaining} دقيقة.")
+            return
 
-    service_id = context.user_data.pop("awaiting_service")
-    await update.message.reply_text("✅😂جاري إرسال الطلب... انتظر النتيجة.")
+        await query.message.reply_text("😂📌 أرسل رابط منشـورك الجميل.")
+        context.user_data["awaiting_link"] = True
 
-    payload = {
-        "api_key": API_KEY,
-        "service_id": service_id,
-        "quantity": QUANTITY,
-        "link": link  # معظم واجهات SMM تتطلب حقل link أو url
-    }
+    elif query.data == "play_xo":
+        await query.message.reply_text("🎮 لعبة XO انطلقت! (هنا تدمج كود اللعبة مالك).")
 
-    try:
-        # نفعل الطلب في thread حتى ما نحبس الـ event loop
-        resp = await asyncio.to_thread(requests.post, API_URL, json=payload, timeout=30)
-        data = resp.json()
-    except Exception as e:
-        logger.exception("request to kds1 failed")
-        await update.message.reply_text(f"حصل خطأ أثناء الاتصال : {e}")
-        await context.bot.send_message(chat_id=ADMIN_ID,
-                                       text=f"خطأ طلب من المستخدم {update.effective_user.id}: {e}")
-        return
+# ===== استقبال الرابط =====
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("awaiting_link"):
+        link = update.message.text
+        user_id = update.message.from_user.id
 
-    # تفسير الرد بشكل عام
-    status = (data.get("status") or "").lower() if isinstance(data.get("status"), str) else ""
-    if status in ("success", "ok", "true"):
-        order_id = data.get("order_id") or data.get("id") or "N/A"
-        await update.message.reply_text(f"😂تم إرسال الطلب بنجاح ✅\nرقم الطلب: {order_id}")
-        await context.bot.send_message(chat_id=ADMIN_ID,
-                                       text=f" طلب ناجح من العزيز {update.effective_user.full_name} id:{update.effective_user.id}\nservice:{service_id}\nlink:{link}\norder:{order_id}")
-    else:
-        # إن لم يكن هناك حقل status واضح نعرض الرسالة كاملة أو رسالة الخطأ
-        msg = data.get("message") or str(data)
-        await update.message.reply_text(f"فشل إرسال الطلب !❌\n{msg}")
-        await context.bot.send_message(chat_id=ADMIN_ID,
-                                       text=f"فشل طلب من {update.effective_user.full_name} id:{update.effective_user.id}\nservice:{service_id}\nlink:{link}\nresp:{msg}")
+        # إرسال الطلب لـ KDS API
+        url = "https://kds1.net/api/v2"
+        payload = {
+            "key": API_KEY,
+            "action": "add",
+            "service": SERVICE_ID,
+            "link": link,
+            "quantity": QUANTITY
+        }
+        try:
+            response = requests.post(url, data=payload)
+            data = response.json()
+            if "order" in data:
+                last_request[user_id] = time.time()
+                await update.message.reply_text("✅ تم استلام طلبك وإضافة الف مشاهدة.")
+            else:
+                await update.message.reply_text("❌ فشل إرسال الطلب، جرب رابط صحيح.")
+        except Exception as e:
+            await update.message.reply_text("⚠️ خطأ بالاتصال.")
 
-# --------- تشغيل البوت ---------
+        context.user_data["awaiting_link"] = False
+
+# ===== تشغيل البوت =====
 def main():
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
     app.run_polling()
 
 if __name__ == "__main__":
