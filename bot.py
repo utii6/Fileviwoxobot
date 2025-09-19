@@ -12,7 +12,7 @@ API_KEY = "24617bb47d8e9a7b8afdfa385a62aed2"
 API_URL = "https://kds1.com/api/v1/order"  # رابط API
 QUANTITY = 250  # عدد المشاهدات لكل طلب
 INTERVAL = 3600  # كل ساعة بالثواني
-MINI_APP_URL = "https://myserver.com/xo.html"  # رابط لعبتك XO
+MINI_APP_URL = "https://viwoxobot.onrender.com"  # رابط لعبتك XO
 
 services = [{"id": SERVICE_ID, "name": "خدمة kds1 رقم 9183"}]
 
